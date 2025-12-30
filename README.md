@@ -25,7 +25,7 @@ A Discord selfbot for automating Mudae interactions. Got fed up with friends tak
   - Character search functionality
 - **Statistics Tracking**: Tracks rolls executed, characters claimed, kakera collected, and more
 - **Multi-Channel Support**: Monitor and interact with multiple Mudae channels simultaneously
-- **Database Persistence**: All settings, statistics, and wishlist data are saved locally
+- **Database Persistence**: Settings, statistics, credentials, and channel data are saved in a local SQLite database
 - **Character Search**: Search for characters directly from the TUI
 - **Smart Cooldown Management**: Tracks command cooldowns to maximize efficiency
 
@@ -78,11 +78,11 @@ Options:
 
 ### Configuration
 
-Configuration is stored in a local SQLite database. You can modify settings through the TUI or by editing the database directly.
+Settings, statistics, credentials, and channel information are stored in a local SQLite database. You can modify settings through the TUI.
 
 #### Wishlist
 
-Create a `wishlist.json` file in the project root (see `wishlist.example.json` for format):
+The wishlist is stored as a JSON file. Create a `wishlist.json` file in the project root (see `wishlist.example.json` for format):
 
 ```json
 {
@@ -127,35 +127,6 @@ mudae-selfbot/
 ├── schema.sql           # Database schema
 ├── Cargo.toml           # Rust dependencies
 └── README.md            # This file
-```
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/AmazingFeature`)
-3. Commit your changes (`git commit -m 'Add some AmazingFeature'`)
-4. Push to the branch (`git push origin feature/AmazingFeature`)
-5. Open a Pull Request
-
-### Development
-
-```bash
-# Run in debug mode
-cargo run
-
-# Run with logging
-RUST_LOG=debug cargo run
-
-# Run tests
-cargo test
-
-# Format code
-cargo fmt
-
-# Lint code
-cargo clippy
 ```
 
 ## License
