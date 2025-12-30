@@ -4,9 +4,9 @@
 
 A Discord selfbot for automating Mudae interactions. Got fed up with friends taking your characters? This bot will automatically roll, claim your wishlist characters, react to kakera, and run daily commands so you never miss out on your favorites.
 
-## Screenshot
+## TUI
 
-<!-- Add a screenshot of the TUI here -->
+![TUI Screenshot](https://i.imgur.com/kc9eMiP.png)
 
 ## Features
 
