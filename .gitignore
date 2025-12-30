@@ -1,0 +1,10 @@
+target/
+Cargo.lock
+*.db
+*.sqlite
+*.sqlite3
+wishlist.json
+*.log
+.env
+.DS_Store
+*.pdb

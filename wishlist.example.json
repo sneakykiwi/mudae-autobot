@@ -1,0 +1,23 @@
+{
+  "characters": [
+    {
+      "name": "Rem",
+      "series": "Re:Zero",
+      "character_id": null,
+      "verified": true,
+      "added_date": "2024-01-15T10:30:00Z",
+      "notes": "Priority character",
+      "priority": 10
+    },
+    {
+      "name": "Emilia",
+      "series": "Re:Zero",
+      "character_id": null,
+      "verified": false,
+      "added_date": "2024-01-15T11:00:00Z",
+      "notes": "Needs verification",
+      "priority": 5
+    }
+  ],
+  "last_updated": "2024-01-15T12:00:00Z"
+}
