@@ -286,11 +286,6 @@ impl RollScheduler {
             if self.executor.is_daily_enabled() {
                 let _ = self.executor.execute_daily_commands(channel_id).await;
             }
-            
-            if self.executor.is_roll_enabled() {
-                let _ = self.executor.check_rolls(channel_id).await;
-                tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
-            }
         }
         
         loop {
@@ -302,39 +297,42 @@ impl RollScheduler {
 
                 let rolls_remaining = self.stats.get_rolls_remaining();
                 if rolls_remaining == 0 {
-                    debug!("No rolls remaining, checking again in 10 seconds");
+                    let time_until_reset = self.stats.format_time_until_roll_reset().await;
+                    if time_until_reset == "Unknown" {
+                        debug!("No rolls remaining, waiting for reset");
+                    } else {
+                        debug!("No rolls remaining, waiting for reset ({} remaining)", time_until_reset);
+                    }
                     tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
                     continue;
                 }
 
-                let available_commands = self.executor.get_all_available_roll_commands().await;
-                if available_commands.is_empty() {
-                    let wait_time = self.executor.get_time_until_next_roll().await
-                        .map(|d| d.num_seconds().max(1) as u64)
-                        .unwrap_or(5);
-                    debug!("All commands on cooldown, waiting {} seconds", wait_time);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(wait_time)).await;
-                    continue;
-                }
-
-                if let Some(cmd) = available_commands.first() {
+                let cmd = self.executor.config.roll_commands.first();
+                if let Some(cmd) = cmd {
                     let current_rolls = self.stats.get_rolls_remaining();
                     if current_rolls == 0 {
-                        debug!("Rolls exhausted, waiting");
-                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                        debug!("Rolls exhausted, stopping");
                         continue;
                     }
-
+                    
                     if let Err(e) = self.executor.client.send_message(channel_id, cmd).await {
                         warn!("Failed to send roll command: {}", e);
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                         continue;
                     }
                     
                     self.executor.update_roll_cooldown(cmd).await;
                     self.stats.increment_rolls_executed();
-                    self.stats.log_event(EventType::Roll, format!("Executed {}", cmd)).await;
                     
+                    if current_rolls > 0 {
+                        self.stats.set_rolls_remaining(current_rolls - 1);
+                    }
+                    
+                    self.stats.log_event(EventType::Roll, format!("Rolling with {}", cmd)).await;
+                    
+                    tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+                } else {
+                    debug!("No roll commands configured");
                     tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
                 }
             }

@@ -130,7 +130,8 @@ impl MessageHandler {
         debug!("Processing Mudae message: embeds={}, components={}", 
                message.embeds.len(), message.components.len());
 
-        let parsed = MudaeParser::parse(message);
+        let username = self.stats.get_username().await;
+        let parsed = MudaeParser::parse(message, username.as_deref());
         
         debug!("Parsed message result: {:?}", std::mem::discriminant(&parsed));
         
@@ -197,9 +198,12 @@ impl MessageHandler {
                 self.stats.set_rolls_remaining(count as u64);
                 
                 let reset_datetime = reset_time.as_ref().and_then(|rt| {
-                    Self::parse_reset_time(rt)
+                    let parsed = Self::parse_reset_time(rt);
+                    debug!("Parsing reset time '{}' -> {:?}", rt, parsed);
+                    parsed
                 });
                 self.stats.set_next_roll_reset(reset_datetime).await;
+                debug!("Set next roll reset to: {:?}", reset_datetime);
                 
                 let msg = if count == 0 {
                     format!("No rolls left ({})", reset_time.as_deref().unwrap_or("reset pending"))

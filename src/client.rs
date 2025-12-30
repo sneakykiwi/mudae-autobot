@@ -383,10 +383,12 @@ impl serenity_self::client::EventHandler for EventHandler {
     async fn ready(&self, _ctx: Context, ready: Ready) {
         let user_id = ready.user.id.get();
         let username = ready.user.name.clone();
+        let display_name = ready.user.global_name.clone().unwrap_or(username.clone());
         let session_id = ready.session_id.clone();
 
+        debug!("Discord client ready, updating status to Connected");
         self.update_status(ConnectionStatus::Connected).await;
-        self.log_event(EventType::Success, format!("Connected as {}", username)).await;
+        self.log_event(EventType::Success, format!("Connected as {}", display_name)).await;
 
         let event = GatewayEvent::Ready {
             user_id,
@@ -396,6 +398,8 @@ impl serenity_self::client::EventHandler for EventHandler {
 
         if let Err(e) = self.event_tx.send(event).await {
             warn!("Failed to send Ready event: {}", e);
+        } else {
+            debug!("Ready event sent successfully");
         }
     }
 
@@ -424,6 +428,7 @@ impl serenity_self::client::EventHandler for EventHandler {
             }
         }
     }
+
 
     async fn reaction_add(&self, _ctx: Context, reaction: Reaction) {
         let event = GatewayEvent::ReactionAdd {

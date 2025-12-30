@@ -123,8 +123,9 @@ async fn main() -> Result<()> {
     let client = DiscordClient::new(token.clone()).with_stats(stats.clone());
 
     if let Ok(user) = client.get_current_user().await {
-        let display_name = user.global_name.unwrap_or(user.username.clone());
-        stats.set_username(display_name.clone()).await;
+        let username = user.username.clone();
+        let display_name = user.global_name.unwrap_or(username.clone());
+        stats.set_username(username.clone()).await;
         let _ = db.save_user_info(&display_name, user.id);
     } else if let Ok(Some(username)) = db.get_username() {
         stats.set_username(username).await;
@@ -225,6 +226,7 @@ async fn main() -> Result<()> {
     
     let client_handle = {
         let token = token.clone();
+        let stats_for_error = stats.clone();
         tokio::spawn(async move {
             let mut client = match Client::builder(&token, intents)
                 .event_handler(event_handler)
@@ -233,12 +235,14 @@ async fn main() -> Result<()> {
                 Ok(client) => client,
                 Err(e) => {
                     error!("Failed to create Discord client: {}", e);
+                    stats_for_error.set_connection_status(crate::stats::ConnectionStatus::Disconnected).await;
                     return;
                 }
             };
 
             if let Err(e) = client.start().await {
                 error!("Client connection error: {}", e);
+                stats_for_error.set_connection_status(crate::stats::ConnectionStatus::Disconnected).await;
             }
         })
     };
@@ -277,8 +281,9 @@ async fn main() -> Result<()> {
         let config = config.clone();
         let db = db.clone();
         let wishlist = wishlist.clone();
+        let client_for_tui = client.clone();
         Some(tokio::spawn(async move {
-            if let Err(e) = tui::run_tui(stats, config, db, wishlist, search_tx, shutdown_rx, channel_infos).await {
+            if let Err(e) = tui::run_tui(stats, config, db, wishlist, search_tx, shutdown_rx, channel_infos, Some(client_for_tui)).await {
                 error!("TUI error: {}", e);
             }
         }))

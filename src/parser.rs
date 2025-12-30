@@ -91,7 +91,7 @@ impl KakeraType {
 pub struct MudaeParser;
 
 impl MudaeParser {
-    pub fn parse(message: &DiscordMessage) -> MudaeMessage {
+    pub fn parse(message: &DiscordMessage, username: Option<&str>) -> MudaeMessage {
         if let Some(embed) = message.embeds.first() {
             if Self::is_character_info(embed) {
                 return Self::parse_character_info(embed);
@@ -107,7 +107,7 @@ impl MudaeParser {
         }
         
         if Self::is_rolls_info(&message.content) {
-            return Self::parse_rolls_info(&message.content);
+            return Self::parse_rolls_info(&message.content, username);
         }
         
         if Self::is_claim_info(&message.content) {
@@ -267,19 +267,43 @@ impl MudaeParser {
             || content.contains("roulette is limited")
     }
 
-    fn parse_rolls_info(content: &str) -> MudaeMessage {
+    fn parse_rolls_info(content: &str, username: Option<&str>) -> MudaeMessage {
         if content.contains("roulette is limited") {
-            let time_regex = Regex::new(r"(\d+)\s*min\s*left").ok();
-            let reset_time = time_regex
-                .and_then(|r| r.captures(content))
-                .and_then(|caps| caps.get(1))
-                .and_then(|m| m.as_str().parse::<i64>().ok())
-                .map(|minutes| format!("{}m", minutes));
+            let cooldown_regex = Regex::new(r"\*\*(\w+)\*\*.*?\*\*(\d+)\*\* min left").ok();
             
-            return MudaeMessage::RollsRemaining {
-                count: 0,
-                reset_time,
-            };
+            if let Some(regex) = cooldown_regex {
+                if let Some(caps) = regex.captures(content) {
+                    let message_username = caps.get(1).map(|m| m.as_str());
+                    let minutes = caps.get(2)
+                        .and_then(|m| m.as_str().parse::<i64>().ok());
+                    
+                    if let (Some(msg_username), Some(mins)) = (message_username, minutes) {
+                        if let Some(expected_username) = username {
+                            let msg_username_lower = msg_username.to_lowercase();
+                            let expected_username_lower = expected_username.to_lowercase();
+                            
+                            tracing::debug!("Checking roulette limited message - message username: '{}', expected username: '{}', minutes: {}", 
+                                msg_username, expected_username, mins);
+                            
+                            if msg_username_lower == expected_username_lower {
+                                let reset_time = Some(format!("{}m", mins));
+                                return MudaeMessage::RollsRemaining {
+                                    count: 0,
+                                    reset_time,
+                                };
+                            } else {
+                                tracing::debug!("Roulette limited message username '{}' does not match expected '{}', ignoring", 
+                                    msg_username, expected_username);
+                                return MudaeMessage::Unknown;
+                            }
+                        } else {
+                            tracing::debug!("Roulette limited message detected but no username available for matching");
+                        }
+                    }
+                }
+            }
+            
+            return MudaeMessage::Unknown;
         }
 
         let rolls_regex = Regex::new(r"(\d+)\s*rolls?\s*left").ok();

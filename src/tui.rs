@@ -100,6 +100,7 @@ pub struct Tui {
     search_tx: SearchRequestSender,
     shutdown_rx: watch::Receiver<bool>,
     channel_infos: Vec<ChannelInfo>,
+    client: Option<Arc<crate::client::DiscordClient>>,
     scroll_offset: u16,
     view: View,
     input_buffer: String,
@@ -109,6 +110,7 @@ pub struct Tui {
     message: Option<(String, bool)>,
     searching: bool,
     pending_search: Option<(String, oneshot::Receiver<Option<SearchResult>>)>,
+    pending_channel_refresh: Option<oneshot::Receiver<()>>,
 }
 
 impl Tui {
@@ -120,6 +122,7 @@ impl Tui {
         search_tx: SearchRequestSender,
         shutdown_rx: watch::Receiver<bool>,
         channel_infos: Vec<ChannelInfo>,
+        client: Option<Arc<crate::client::DiscordClient>>,
     ) -> Result<Self> {
         enable_raw_mode()?;
         let mut stdout = io::stdout();
@@ -136,6 +139,7 @@ impl Tui {
             search_tx,
             shutdown_rx,
             channel_infos,
+            client,
             scroll_offset: 0,
             view: View::Dashboard,
             input_buffer: String::new(),
@@ -145,6 +149,7 @@ impl Tui {
             message: None,
             searching: false,
             pending_search: None,
+            pending_channel_refresh: None,
         })
     }
 
@@ -158,6 +163,7 @@ impl Tui {
             }
 
             self.check_pending_search().await;
+            self.check_pending_channel_refresh().await;
 
             tokio::select! {
                 _ = tick.tick() => {
@@ -215,6 +221,22 @@ impl Tui {
                     self.searching = false;
                     self.message = Some(("Search failed - channel closed".to_string(), false));
                 }
+            }
+        }
+    }
+
+    async fn check_pending_channel_refresh(&mut self) {
+        if let Some(mut rx) = self.pending_channel_refresh.take() {
+            match rx.try_recv() {
+                Ok(()) => {
+                    if let Ok(updated_infos) = self.db.get_channels_with_names() {
+                        self.channel_infos = updated_infos;
+                    }
+                }
+                Err(oneshot::error::TryRecvError::Empty) => {
+                    self.pending_channel_refresh = Some(rx);
+                }
+                Err(oneshot::error::TryRecvError::Closed) => {}
             }
         }
     }
@@ -367,7 +389,20 @@ impl Tui {
                                 name: None,
                                 guild: None,
                             }).collect();
-                            self.message = Some(("Channels saved! Restart to apply.".to_string(), true));
+                            
+                            if let Some(ref client) = self.client {
+                                let client_clone = client.clone();
+                                let db_clone = self.db.clone();
+                                let ids_clone = ids.clone();
+                                let (tx, rx) = oneshot::channel();
+                                self.pending_channel_refresh = Some(rx);
+                                tokio::spawn(async move {
+                                    Self::fetch_channel_names(client_clone, db_clone, ids_clone).await;
+                                    let _ = tx.send(());
+                                });
+                            }
+                            
+                            self.message = Some(("Channels saved! Fetching names...".to_string(), true));
                             self.view = View::Settings;
                             self.input_buffer.clear();
                         }
@@ -618,7 +653,7 @@ impl Tui {
     async fn draw(&mut self) -> Result<()> {
         let stats = self.stats.clone();
         let config = self.config.clone();
-        let channel_infos = self.channel_infos.clone();
+        let channel_infos = self.db.get_channels_with_names().unwrap_or_else(|_| self.channel_infos.clone());
         let scroll_offset = self.scroll_offset;
         let view = self.view.clone();
         let input_buffer = self.input_buffer.clone();
@@ -1356,6 +1391,34 @@ impl Tui {
         }
     }
 
+    async fn fetch_channel_names(
+        client: Arc<crate::client::DiscordClient>,
+        db: Arc<Database>,
+        channel_ids: Vec<u64>,
+    ) {
+        for channel_id in channel_ids {
+            if let Ok(channel) = client.get_channel(channel_id).await {
+                let guild_name = if let Some(guild_id_str) = &channel.guild_id {
+                    if let Ok(guild_id) = guild_id_str.parse::<u64>() {
+                        client.get_guild(guild_id).await.ok().map(|g| g.name)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                
+                if let Err(e) = db.update_channel_name(
+                    channel_id,
+                    channel.name.as_deref().unwrap_or("Unknown"),
+                    guild_name.as_deref(),
+                ) {
+                    tracing::error!("Failed to update channel name: {}", e);
+                }
+            }
+        }
+    }
+
     pub fn cleanup(&mut self) -> Result<()> {
         disable_raw_mode()?;
         execute!(
@@ -1402,8 +1465,10 @@ pub async fn run_tui(
     search_tx: SearchRequestSender,
     shutdown_rx: watch::Receiver<bool>,
     channel_infos: Vec<ChannelInfo>,
+    client: Option<crate::client::DiscordClient>,
 ) -> Result<()> {
-    let mut tui = Tui::new(stats, config, db, wishlist, search_tx, shutdown_rx, channel_infos)?;
+    let client_arc = client.map(Arc::new);
+    let mut tui = Tui::new(stats, config, db, wishlist, search_tx, shutdown_rx, channel_infos, client_arc)?;
     tui.run().await?;
     tui.cleanup()?;
     Ok(())
