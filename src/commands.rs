@@ -297,22 +297,50 @@ impl RollScheduler {
 
                 let rolls_remaining = self.stats.get_rolls_remaining();
                 if rolls_remaining == 0 {
-                    let time_until_reset = self.stats.format_time_until_roll_reset().await;
-                    if time_until_reset == "Unknown" {
-                        debug!("No rolls remaining, waiting for reset");
+                    let reset_time = self.stats.get_next_roll_reset().await;
+                    let now = Utc::now();
+                    
+                    if let Some(reset) = reset_time {
+                        if reset <= now {
+                            debug!("Reset time has passed, attempting to roll to refresh roll count");
+                            let cmd = self.executor.config.roll_commands.first();
+                            if let Some(cmd) = cmd {
+                                if let Err(e) = self.executor.client.send_message(channel_id, cmd).await {
+                                    warn!("Failed to send roll command after reset: {}", e);
+                                } else {
+                                    self.executor.update_roll_cooldown(cmd).await;
+                                    self.stats.log_event(EventType::Roll, format!("Rolling after reset with {}", cmd)).await;
+                                }
+                            }
+                            tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                            continue;
+                        } else {
+                            let time_until_reset = self.stats.format_time_until_roll_reset().await;
+                            debug!("No rolls remaining, waiting for reset ({} remaining)", time_until_reset);
+                            let duration_until_reset = reset.signed_duration_since(now);
+                            let sleep_seconds = duration_until_reset.num_seconds().max(1).min(10) as u64;
+                            tokio::time::sleep(tokio::time::Duration::from_secs(sleep_seconds)).await;
+                            continue;
+                        }
                     } else {
-                        debug!("No rolls remaining, waiting for reset ({} remaining)", time_until_reset);
+                        let time_until_reset = self.stats.format_time_until_roll_reset().await;
+                        if time_until_reset == "Unknown" {
+                            debug!("No rolls remaining, waiting for reset");
+                        } else {
+                            debug!("No rolls remaining, waiting for reset ({} remaining)", time_until_reset);
+                        }
+                        tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
+                        continue;
                     }
-                    tokio::time::sleep(tokio::time::Duration::from_secs(10)).await;
-                    continue;
                 }
 
                 let cmd = self.executor.config.roll_commands.first();
                 if let Some(cmd) = cmd {
                     let current_rolls = self.stats.get_rolls_remaining();
-                    if current_rolls == 0 {
-                        debug!("Rolls exhausted, stopping");
-                        continue;
+                    let is_extra_roll = current_rolls == 0;
+                    
+                    if is_extra_roll {
+                        debug!("Rolls exhausted, sending one extra roll (n+1) to trigger cooldown message");
                     }
                     
                     if let Err(e) = self.executor.client.send_message(channel_id, cmd).await {
@@ -324,11 +352,17 @@ impl RollScheduler {
                     self.executor.update_roll_cooldown(cmd).await;
                     self.stats.increment_rolls_executed();
                     
-                    if current_rolls > 0 {
+                    if !is_extra_roll && current_rolls > 0 {
                         self.stats.set_rolls_remaining(current_rolls - 1);
                     }
                     
-                    self.stats.log_event(EventType::Roll, format!("Rolling with {}", cmd)).await;
+                    if is_extra_roll {
+                        self.stats.log_event(EventType::Roll, format!("Rolling extra roll (n+1) to trigger cooldown with {}", cmd)).await;
+                        tokio::time::sleep(tokio::time::Duration::from_secs(2)).await;
+                        continue;
+                    } else {
+                        self.stats.log_event(EventType::Roll, format!("Rolling with {}", cmd)).await;
+                    }
                     
                     tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
                 } else {
